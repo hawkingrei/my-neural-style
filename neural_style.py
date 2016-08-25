@@ -1,8 +1,8 @@
-#import vgg
+import vgg
 
 import tensorflow as tf
 import numpy as np
-
+import scipy.misc
 from sys import stderr
 
 CONTENT_WEIGHT = 5e0
@@ -13,6 +13,8 @@ STYLE_SCALE = 1.0
 ITERATIONS = 1000
 VGG_PATH = 'imagenet-vgg-verydeep-19.mat'
 
+CONTENT_LAYER = 'relu4_2'
+STYLE_LAYERS = ('relu1_1', 'relu2_1', 'relu3_1', 'relu4_1', 'relu5_1')
 
 def net(data_path, input_image):
     layers = (
@@ -66,7 +68,7 @@ def _pool_layer(input):
             padding='SAME')
 
 def main():
-
+    network=VGG_PATH
     import sys
     #print sys.path[0]
     #print options.network
@@ -85,8 +87,6 @@ def main():
     target_shape = content_image.shape
     for i in range(len(style_images)):
         style_scale = STYLE_SCALE
-        if options.style_scales is not None:
-            style_scale = options.style_scales[i]
         style_images[i] = scipy.misc.imresize(style_images[i], style_scale *
                 target_shape[1] / style_images[i].shape[1])
 
@@ -99,13 +99,52 @@ def main():
         style_blend_weights = [weight/total_blend_weight
                                for weight in style_blend_weights]
 
-    initial = options.initial
-    if initial is not None:
-        initial = scipy.misc.imresize(imread(initial), content_image.shape[:2])
+#    initial = options.initial
+#    if initial is not None:
+#        initial = scipy.misc.imresize(imread(initial), content_image.shape[:2])
 
-    if options.checkpoint_output and "%s" not in options.checkpoint_output:
-        parser.error("To save intermediate images, the checkpoint output "
-                     "parameter must contain `%s` (e.g. `foo%s.jpg`)")
+#    if options.checkpoint_output and "%s" not in options.checkpoint_output:
+#        parser.error("To save intermediate images, the checkpoint output "
+#                     "parameter must contain `%s` (e.g. `foo%s.jpg`)")
+    content=content_image
+    styles=style_images
+    shape = (1,) + content.shape
+    style_shapes = [(1,) + style.shape for style in styles]
+    content_features = {}
+    style_features = [{} for _ in styles]
+    g = tf.Graph()
+    with g.as_default(), g.device('/cpu:0'), tf.Session() as sess:
+        image = tf.placeholder('float', shape=shape)
+        net, mean_pixel = vgg.net(network, image)
+        content_pre = np.array([vgg.preprocess(content, mean_pixel)])
+        content_features[CONTENT_LAYER] = net[CONTENT_LAYER].eval(
+                feed_dict={image: content_pre})
+    print "========================content.shape========================"
+    print content.shape[0]
+    print content.shape[1]
+    print content.shape[2]
+    print "========================content_features.shape========================"
+    print content_features[CONTENT_LAYER].shape[0]
+    print content_features[CONTENT_LAYER].shape[1]
+    print content_features[CONTENT_LAYER].shape[2]
+
+    for i in range(len(styles)):
+        g = tf.Graph()
+        with g.as_default(), g.device('/cpu:0'), tf.Session() as sess:
+            image = tf.placeholder('float', shape=style_shapes[i])
+            net, _ = vgg.net(network, image)
+            style_pre = np.array([vgg.preprocess(styles[i], mean_pixel)])
+            for layer in STYLE_LAYERS:
+                features = net[layer].eval(feed_dict={image: style_pre})
+                features = np.reshape(features, (-1, features.shape[3]))
+                gram = np.matmul(features.T, features) / features.size
+                style_features[i][layer] = gram
+    for layer in STYLE_LAYERS:
+        print "================================================="
+        print layer
+        print style_features[0][layer].shape[0]
+        print style_features[0][layer].shape[1]
+        #print style_features[0][layer].shape[2]
 
 def imread(path):
     return scipy.misc.imread(path).astype(np.float)

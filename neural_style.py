@@ -3,6 +3,8 @@ import vgg
 import tensorflow as tf
 import numpy as np
 import scipy.misc
+import matplotlib.pyplot as plt
+import matplotlib.image as mpimg
 from sys import stderr
 
 CONTENT_WEIGHT = 5e0
@@ -127,7 +129,6 @@ def main():
     print content_features[CONTENT_LAYER].shape[0]
     print content_features[CONTENT_LAYER].shape[1]
     print content_features[CONTENT_LAYER].shape[2]
-
     for i in range(len(styles)):
         g = tf.Graph()
         with g.as_default(), g.device('/cpu:0'), tf.Session() as sess:
@@ -145,6 +146,30 @@ def main():
         print style_features[0][layer].shape[0]
         print style_features[0][layer].shape[1]
         #print style_features[0][layer].shape[2]
+    with tf.Graph().as_default():
+        noise = np.random.normal(size=shape, scale=np.std(content) * 0.1)
+        initial = tf.random_normal(shape) * 0.256
+
+        image = tf.Variable(initial)
+        net, _ = vgg.net(network, image)
+        content_loss = content_weight * (2 * tf.nn.l2_loss(
+                net[CONTENT_LAYER] - content_features[CONTENT_LAYER]) /
+                content_features[CONTENT_LAYER].size)
+        style_loss = 0
+
+        for i in range(len(styles)):
+            style_losses = []
+            for style_layer in STYLE_LAYERS:
+                layer = net[style_layer]
+                _, height, width, number = map(lambda i: i.value, layer.get_shape())
+                size = height * width * number
+                feats = tf.reshape(layer, (-1, number))
+                gram = tf.matmul(tf.transpose(feats), feats) / size
+                style_gram = style_features[i][style_layer]
+                style_losses.append(2 * tf.nn.l2_loss(gram - style_gram) / style_gram.size)
+            style_loss += style_weight * style_blend_weights[i] * reduce(tf.add, style_losses)
+
+        
 
 def imread(path):
     return scipy.misc.imread(path).astype(np.float)
